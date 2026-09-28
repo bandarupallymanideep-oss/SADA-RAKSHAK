@@ -1,11 +1,13 @@
 import React from 'react';
-import { Search, Camera as CameraIcon, AlertCircle, MapPin, Calendar } from 'lucide-react';
-import type { Camera, AlertFilterOptions } from '../api/types';
+import { Search, Camera as CameraIcon, AlertCircle, MapPin, Calendar, Tag } from 'lucide-react';
+import type { AccidentCategory, Camera, AlertFilterOptions } from '../api/types';
 
 interface AlertFilterBarProps {
   filters: AlertFilterOptions;
   onChange: (newFilters: AlertFilterOptions) => void;
   cameras: Camera[];
+  categories?: AccidentCategory[];
+  categoryCounts?: Record<string, number>;
   availableLocations?: string[];
   totalRecordsCount: number;
 }
@@ -14,6 +16,8 @@ export const AlertFilterBar: React.FC<AlertFilterBarProps> = ({
   filters,
   onChange,
   cameras,
+  categories = [],
+  categoryCounts = {},
   availableLocations = [],
   totalRecordsCount
 }) => {
@@ -27,6 +31,7 @@ export const AlertFilterBar: React.FC<AlertFilterBarProps> = ({
     filters.search || 
     filters.status || 
     filters.cameraId || 
+    filters.category || 
     filters.location || 
     filters.severity || 
     (filters.dateRange && filters.dateRange !== 'all')
@@ -42,7 +47,7 @@ export const AlertFilterBar: React.FC<AlertFilterBarProps> = ({
             type="text"
             value={filters.search || ''}
             onChange={(e) => onChange({ ...filters, search: e.target.value })}
-            placeholder="Search by accident ID (e.g. accident0), location, camera, or impact type..."
+            placeholder="Search by accident ID (e.g. accident0), location, camera or category..."
             className="w-full pl-10 pr-4 py-2 bg-slate-950 border border-slate-800 focus:border-red-500 focus:ring-1 focus:ring-red-500 rounded-xl text-xs text-white placeholder-slate-500 outline-none transition-all font-sans"
           />
         </div>
@@ -74,6 +79,43 @@ export const AlertFilterBar: React.FC<AlertFilterBarProps> = ({
           })}
         </div>
       </div>
+
+      {/* Category chips: the four specified categories first, then other classes the model detects */}
+      {categories.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800/60 text-xs">
+          <span className="flex items-center gap-1.5 text-slate-400 font-mono text-[11px] mr-1">
+            <Tag className="w-3.5 h-3.5 text-red-400" /> CATEGORY:
+          </span>
+          {[{ id: 'all', label: 'ALL', supported: true, required: true, yoloClasses: [] as string[] }, ...categories].map(cat => {
+            const selected = (filters.category || 'all') === cat.id;
+            const count = cat.id === 'all' ? totalRecordsCount : categoryCounts[cat.id] || 0;
+            const label = cat.id === 'all' ? 'All' : cat.label.replace(' ACCIDENT', '').replace('–', ' + ');
+            return (
+              <button
+                key={cat.id}
+                type="button"
+                disabled={!cat.supported}
+                onClick={() => onChange({ ...filters, category: cat.id === 'all' ? undefined : cat.id })}
+                title={
+                  cat.supported
+                    ? `${cat.label}${cat.yoloClasses.length ? ` (YOLO class: ${cat.yoloClasses.join(', ')})` : ''}`
+                    : `${cat.label}: not detectable by the current YOLO11 model (it has no truck class). Supported automatically when a model with this class is deployed.`
+                }
+                className={`px-2.5 py-1 rounded-full border font-mono text-[11px] transition-all ${
+                  !cat.supported
+                    ? 'border-dashed border-slate-700 text-slate-500 cursor-not-allowed'
+                    : selected
+                    ? 'bg-red-600 border-red-600 text-white shadow-md shadow-red-600/25 cursor-pointer'
+                    : 'border-slate-700 text-slate-300 hover:border-slate-500 hover:text-white cursor-pointer'
+                }`}
+              >
+                {label}
+                {cat.supported ? <span className="ml-1.5 opacity-70">{count}</span> : <span className="ml-1.5">· N/A</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Secondary Row: Camera, Location, Date Range, Severity Filters */}
       <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-slate-800/60 text-xs">

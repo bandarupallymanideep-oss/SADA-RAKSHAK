@@ -4,6 +4,7 @@ import { LogOut, Clock, Shield, Video, Bell, ChevronDown, Menu } from 'lucide-re
 import { useAuth } from '../context/AuthContext';
 import { useAlerts } from '../context/AlertsContext';
 import { useCameras } from '../context/CameraContext';
+import { ThemeToggle } from './ThemeToggle';
 
 interface TopBarProps {
   onToggleSidebar?: () => void;
@@ -81,12 +82,14 @@ export const TopBar: React.FC<TopBarProps> = ({ onToggleSidebar }) => {
       {/* Right controls */}
       <div className="flex items-center gap-4">
         {/* Live Clock HUD */}
-        <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/90 border border-slate-800/80 text-xs font-mono text-slate-300">
+        <div className="hidden xl:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/90 border border-slate-800/80 text-xs font-mono text-slate-300">
           <Clock className="w-3.5 h-3.5 text-red-400" />
           <span className="text-white font-semibold">{currentTime}</span>
           <span className="text-slate-500">|</span>
           <span className="text-slate-400">{currentUtc}</span>
         </div>
+
+        <ThemeToggle />
 
         {/* Quick link to live detection */}
         <button
@@ -142,7 +145,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onToggleSidebar }) => {
           {/* Profile Dropdown Menu */}
           {profileOpen && (
             <div 
-              className="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl py-2 z-50 animate-in fade-in slide-in-from-top-2"
+              className="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl py-2 z-50 animate-menu-in"
               onMouseLeave={() => setProfileOpen(false)}
             >
               <div className="px-4 py-2 border-b border-slate-800">

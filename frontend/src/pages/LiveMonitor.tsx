@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Grid2X2,
   Grid3X3,
@@ -212,7 +212,11 @@ export const LiveMonitor: React.FC = () => {
   const { flashingCameraIds, alerts } = useAlerts();
 
   const [layout, setLayout] = useState<'1x1' | '2x2' | '3x3'>('2x2');
-  const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedCameraId = searchParams.get('camera');
+  // the focused feed lives in the URL (?camera=cam-1): shareable, back/forward friendly, same tab
+  const setSelectedCameraId = (id: string | null) =>
+    setSearchParams(id ? { camera: id } : {}, { replace: !id });
   const [showAiOverlay, setShowAiOverlay] = useState<boolean>(true);
   const [activeFilterCameraId, setActiveFilterCameraId] = useState<string>('all');
   const [modalBusy, setModalBusy] = useState(false);
@@ -349,6 +353,7 @@ export const LiveMonitor: React.FC = () => {
               camera={camera}
               isFlashing={flashingCameraIds.has(camera.id)}
               onExpand={(c) => { setSelectedCameraId(c.id); setModalError(null); }}
+              compact={layout === '3x3'}
               showAiOverlay={showAiOverlay}
             />
           ))}
@@ -358,11 +363,11 @@ export const LiveMonitor: React.FC = () => {
       {/* Focus modal */}
       {selected && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-lg overflow-y-auto"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-lg overflow-y-auto animate-backdrop-in"
           onClick={() => setSelectedCameraId(null)}
         >
           <div
-            className="relative w-full max-w-5xl bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto"
+            className="relative w-full max-w-5xl bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto animate-modal-in"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/80 gap-3">
@@ -392,7 +397,7 @@ export const LiveMonitor: React.FC = () => {
               </div>
             </div>
 
-            <div className="relative aspect-video bg-black flex items-center justify-center overflow-hidden">
+            <div className="force-dark relative aspect-video bg-black flex items-center justify-center overflow-hidden">
               {modalImage ? (
                 <img src={modalImage} alt={selected.name} className="w-full h-full object-contain" />
               ) : (
@@ -418,11 +423,22 @@ export const LiveMonitor: React.FC = () => {
               </div>
             )}
 
-            <div className="p-5 bg-slate-900/60 border-t border-slate-800 grid grid-cols-2 md:grid-cols-4 gap-4 text-xs font-mono">
+            <div className="p-5 bg-slate-900/60 border-t border-slate-800 grid grid-cols-2 md:grid-cols-5 gap-4 text-xs font-mono">
               <div className="col-span-2">
                 <span className="text-slate-500 text-[10px] block mb-1">SOURCE</span>
                 <span className="text-white font-semibold">{selected.sourceType === 'rtsp' ? 'RTSP STREAM' : 'VIDEO FILE'}</span>
                 <p className="text-slate-400 text-[11px] truncate mt-0.5">{selected.sourceType === 'rtsp' ? selected.sourceUrl : selected.fileName || selected.sourceUrl}</p>
+              </div>
+              <div>
+                <span className="text-slate-500 text-[10px] block mb-1">LATENCY (MEASURED)</span>
+                <span className="text-white">
+                  {det?.active && det.latency?.deliveryMs != null ? `${Math.round(det.latency.deliveryMs)} ms stream` : '—'}
+                </span>
+                <p className="text-slate-400 text-[11px] mt-0.5">
+                  {det?.active && det.latency?.detectionMs != null
+                    ? `YOLO11 ${Math.round(det.latency.detectionMs)} ms · ${det.latency.engine}`
+                    : 'Detection stopped'}
+                </p>
               </div>
               <div>
                 <span className="text-slate-500 text-[10px] block mb-1">STREAM / YOLO11</span>
@@ -434,7 +450,7 @@ export const LiveMonitor: React.FC = () => {
                 <span className="text-white">{det?.framesProcessed ?? 0}{det?.totalFrames ? ` / ${det.totalFrames}` : ''}</span>
                 <p className="text-slate-400 text-[11px] mt-0.5">{det?.resolution || selected.resolution}</p>
               </div>
-              <div className="col-span-2 md:col-span-3">
+              <div className="col-span-2 md:col-span-4">
                 <span className="text-slate-500 text-[10px] block mb-1">SAVED ACCIDENT FOOTAGE ({cameraAccidents.length})</span>
                 {cameraAccidents.length === 0 ? (
                   <span className="text-slate-500">No accident detected on this camera yet</span>
@@ -452,7 +468,7 @@ export const LiveMonitor: React.FC = () => {
               <div className="flex items-end justify-end">
                 <button
                   type="button"
-                  onClick={() => { setSelectedCameraId(null); navigate('/alerts'); }}
+                  onClick={() => navigate(`/alerts?camera=${encodeURIComponent(selected.id)}`)}
                   className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors cursor-pointer"
                 >
                   <span>Alerts & Violations</span>

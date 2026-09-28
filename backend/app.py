@@ -36,6 +36,7 @@ from sadarakshak.constant.application import (
     DETECTED_ACCIDENTS_DIR, UPLOADS_DIR, VIDEO_EXTENSIONS, CONFIDENCE_THRESHOLD, MJPEG_MAX_FPS,
 )
 from sadarakshak.components.accident_detector import ACCIDENT_CLASS_IDS
+from sadarakshak.components.categories import categories_for_model
 from sadarakshak.components.accident_store import accident_store
 from sadarakshak.components.camera_store import camera_store
 from sadarakshak.components.stream_utils import (
@@ -117,6 +118,7 @@ async def _start_camera(cam, test_first: bool = True):
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    accident_store.recover_interrupted()  # clips cut off by a previous crash/restart
     # resume monitoring of RTSP cameras that were running before a restart (files are not re-processed)
     for cam in camera_store.list():
         if cam.get("autoStart") and is_stream_url(cam.get("sourceUrl") or ""):
@@ -156,7 +158,9 @@ async def health_check():
         "model": {
             "path": str(MODEL_PATH.relative_to(BASE_DIR)) if MODEL_PATH.is_relative_to(BASE_DIR) else MODEL_PATH.name,
             "type": "YOLO11m (Ultralytics detect)",
+            "engine": model.engine,
             "device": str(model.device),
+            "warmupInferenceMs": round(model.warmup_ms, 1),
             "classes": model.class_names,
             "accidentClassIds": sorted(ACCIDENT_CLASS_IDS),
             "confidenceThreshold": CONFIDENCE_THRESHOLD,
@@ -491,20 +495,28 @@ async def session_stream(session_id: str, request: Request, overlay: bool = True
         return _err("SESSION_NOT_FOUND", f"No detection session '{session_id}'.", 404)
 
     async def gen():
-        last_seq, interval = -1, 1.0 / MJPEG_MAX_FPS
+        # Push each new frame as soon as it is ready (checked every 5 ms) instead of a fixed
+        # poll interval, capped at MJPEG_MAX_FPS - keeps display latency low.
+        last_seq, last_sent, min_gap = -1, 0.0, 1.0 / MJPEG_MAX_FPS
+        checks = 0
         while True:
-            if await request.is_disconnected():
+            checks += 1
+            if checks % 40 == 0 and await request.is_disconnected():
                 break
             s = sessions.get(session_id)
             if s is None:
                 break
-            jpeg, seq = await run_in_threadpool(s.get_jpeg, overlay)
-            if jpeg and seq != last_seq:
-                last_seq = seq
-                yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n"
-            elif not s.is_active:
+            if s.frame_seq != last_seq and time.time() - last_sent >= min_gap:
+                jpeg, seq, captured_at = (s.get_jpeg(True) if overlay
+                                          else await run_in_threadpool(s.get_jpeg, False))
+                if jpeg:
+                    last_seq, last_sent = seq, time.time()
+                    yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n"
+                    s.note_delivery(captured_at)
+                    continue
+            elif not s.is_active and s.frame_seq == last_seq:
                 break  # session over: the browser keeps showing the last frame
-            await asyncio.sleep(interval)
+            await asyncio.sleep(0.005)
 
     return StreamingResponse(gen(), media_type="multipart/x-mixed-replace; boundary=frame",
                              headers={"Cache-Control": "no-store"})
@@ -540,6 +552,24 @@ async def get_accident(accident_id: str):
     if rec is None:
         return _err("ACCIDENT_NOT_FOUND", f"Accident '{accident_id}' not found.", 404)
     return rec
+
+
+@app.get("/api/accident-categories")
+async def accident_categories():
+    """Alert categories and whether the current YOLO model can detect them."""
+    return {"categories": categories_for_model(pipeline.model_trainer.class_names.values())}
+
+
+@app.delete("/api/accidents/{accident_id}")
+async def delete_accident(accident_id: str):
+    """Delete an accident alert (its video/snapshot/metadata are moved to detected_accidents/deleted/)."""
+    try:
+        ok = accident_store.delete(accident_id)
+    except RuntimeError as e:
+        return _err("ACCIDENT_RECORDING", str(e), 409)
+    if not ok:
+        return _err("ACCIDENT_NOT_FOUND", f"Accident '{accident_id}' not found.", 404)
+    return {"success": True, "id": accident_id}
 
 
 @app.patch("/api/accidents/{accident_id}")
@@ -657,7 +687,7 @@ async def accident_detection_websocket(websocket: WebSocket):
                     await websocket.send_json({"type": "video_info", "width": w, "height": h, "fps": st["sourceFps"],
                                                "total_frames": st["totalFrames"], "severity": "info",
                                                "message": f"Processing video ({st['resolution']})"})
-                jpeg, seq = s.get_jpeg(True)
+                jpeg, seq, _ = s.get_jpeg(True)
                 if jpeg and seq != last_seq:
                     last_seq = seq
                     await websocket.send_json({"type": "frame", "frame": base64.b64encode(jpeg).decode(),

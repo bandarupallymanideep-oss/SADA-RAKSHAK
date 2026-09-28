@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Outlet, Navigate } from 'react-router-dom';
+import { Outlet, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useAlerts } from '../context/AlertsContext';
 import { Sidebar } from './Sidebar';
@@ -10,12 +10,13 @@ export const Layout: React.FC = () => {
   const { isAuthenticated, isLoading } = useAuth();
   const { recentAlert, dismissRecentAlert } = useAlerts();
 
+  const location = useLocation();
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[#090d16] flex items-center justify-center text-slate-300 font-mono text-sm">
+      <div className="min-h-screen app-bg flex items-center justify-center text-slate-300 font-mono text-sm">
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 rounded-full border-2 border-red-500 border-t-transparent animate-spin" />
           <span>INITIALIZING SADARAKSHAK CONTROL ROOM...</span>
@@ -29,7 +30,7 @@ export const Layout: React.FC = () => {
   }
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[#090d16] text-slate-100 font-sans">
+    <div className="flex h-screen w-screen overflow-hidden app-bg text-slate-100 font-sans">
       {/* Sidebar Navigation */}
       <Sidebar 
         isOpen={mobileSidebarOpen}
@@ -43,8 +44,11 @@ export const Layout: React.FC = () => {
         <TopBar onToggleSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)} />
         
         {/* Scrollable page view */}
-        <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900/40 via-[#090d16] to-[#090d16]">
-          <Outlet />
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6">
+          {/* keyed on the path: each page fades in on navigation (same tab, no reload) */}
+          <div key={location.pathname} className="animate-page-in">
+            <Outlet />
+          </div>
         </main>
       </div>
 

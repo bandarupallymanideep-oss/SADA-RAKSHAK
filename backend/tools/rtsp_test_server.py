@@ -29,6 +29,21 @@ import cv2
 
 REALM = "SADARAKSHAK-TestCam"
 
+STAMP_BITS, STAMP_CELL = 40, 12  # latency stamp: 40-bit ms clock + 4-bit checksum, 12x12 px cells
+
+
+def stamp_frame(frame, t: float):
+    """Burn the send time into the bottom-left corner as black/white cells (read by measure_latency.py)."""
+    ms = int(t * 1000) & ((1 << STAMP_BITS) - 1)
+    bits = [(ms >> i) & 1 for i in range(STAMP_BITS)]
+    bits += [(sum(bits) >> i) & 1 for i in range(4)]
+    h = frame.shape[0]
+    y0 = h - STAMP_CELL - 2
+    frame[y0 - 2:h, 0:(len(bits) * STAMP_CELL) + 4] = 128
+    for i, b in enumerate(bits):
+        x0 = 2 + i * STAMP_CELL
+        frame[y0:y0 + STAMP_CELL, x0:x0 + STAMP_CELL] = 255 if b else 0
+
 
 def split_nals(data: bytes):
     """Split an Annex-B byte stream into NAL units (without start codes)."""
@@ -196,6 +211,8 @@ class ClientHandler(threading.Thread):
                     continue
                 if frame.shape[1] != w or frame.shape[0] != h:
                     frame = cv2.resize(frame, (w, h))
+                if self.args.stamp:
+                    stamp_frame(frame, time.time())
                 vf = av.VideoFrame.from_ndarray(frame, format="bgr24")
                 vf.pts = int(n * 90000 / fps)
                 ts = vf.pts & 0xFFFFFFFF
@@ -243,6 +260,7 @@ def main():
     ap.add_argument("--user", default=None)
     ap.add_argument("--password", default="")
     ap.add_argument("--no-loop", action="store_true", help="stop the stream at the end of the video")
+    ap.add_argument("--stamp", action="store_true", help="burn send timestamps into frames (for tools/measure_latency.py)")
     args = ap.parse_args()
     if not os.path.exists(args.video):
         raise SystemExit(f"Video not found: {args.video}")

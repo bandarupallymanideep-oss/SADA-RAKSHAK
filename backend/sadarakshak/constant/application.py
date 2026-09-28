@@ -42,17 +42,23 @@ VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v"}
 # ---------------------------------------------------------------- model / detection
 # The trained model (YOLO11m) was trained at 640px; inference uses the same size.
 INFERENCE_IMGSZ = _env_int("INFERENCE_IMGSZ", 640)
+# auto | cpu | cuda | intel:gpu | intel:npu | intel:cpu  (intel:* = OpenVINO export of the same best.pt)
+INFERENCE_DEVICE = os.environ.get("SADARAKSHAK_INFERENCE_DEVICE", "auto")
 # Minimum confidence to draw a box on the annotated output.
 DISPLAY_CONFIDENCE = _env_float("DISPLAY_CONFIDENCE", 0.25)
 # Minimum confidence for an accident-class detection to count as an accident (existing value).
 CONFIDENCE_THRESHOLD = _env_float("CONFIDENCE_THRESHOLD", 0.85)
-# An accident event starts when MIN_ACCIDENT_HITS of the last HIT_WINDOW inferences are accidents.
+# An accident event starts when, within the last CONFIRM_WINDOW_S seconds of video, at least
+# MIN_ACCIDENT_HITS inferences are accidents AND they make up >= MIN_HIT_RATIO of the inferences.
+# Time-based, so behaviour is the same whether YOLO runs at 3/s (CPU) or 30/s (iGPU).
 MIN_ACCIDENT_HITS = _env_int("MIN_ACCIDENT_HITS", 2)
+CONFIRM_WINDOW_S = _env_float("CONFIRM_WINDOW_S", 1.5)
+MIN_HIT_RATIO = _env_float("MIN_HIT_RATIO", 0.4)
 # Only count an accident when the same frame also contains a road object (car / bike / person).
 # The model was trained on road footage only and can hallucinate "accidents" on unrelated content
 # (e.g. a phone home screen); on backend/accident_clips every real accident frame has road context.
 REQUIRE_ROAD_CONTEXT = _env_int("REQUIRE_ROAD_CONTEXT", 1) == 1
-HIT_WINDOW = _env_int("HIT_WINDOW", 5)
+HIT_WINDOW = _env_int("HIT_WINDOW", 5)  # legacy (unused)
 
 # ---------------------------------------------------------------- accident clip recording
 PRE_ACCIDENT_SECONDS = _env_float("PRE_ACCIDENT_SECONDS", 3.0)    # footage kept before the accident
@@ -69,8 +75,12 @@ TCP_CONNECT_TIMEOUT_S = _env_float("TCP_CONNECT_TIMEOUT_S", 4.0)
 RTSP_HANDSHAKE_TIMEOUT_S = _env_float("RTSP_HANDSHAKE_TIMEOUT_S", 10.0)
 RECONNECT_ATTEMPTS = _env_int("RECONNECT_ATTEMPTS", 5)
 RECONNECT_DELAY_S = _env_float("RECONNECT_DELAY_S", 3.0)
-MJPEG_MAX_FPS = _env_float("MJPEG_MAX_FPS", 15.0)
+# FFmpeg decodes H.264 with frame-threading = one frame of delay PER THREAD (14 threads on a
+# 14-core CPU = ~470 ms). 1 decoder thread measured 36 ms RTSP latency and handles 1080p30.
+STREAM_DECODER_THREADS = _env_int("STREAM_DECODER_THREADS", 1)
+MJPEG_MAX_FPS = _env_float("MJPEG_MAX_FPS", 30.0)
 MJPEG_QUALITY = _env_int("MJPEG_QUALITY", 80)
 
-# RTSP over TCP is far more reliable than UDP through NAT/firewalls. Respect a user override.
-os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
+# RTSP over TCP is far more reliable than UDP through NAT/firewalls. nobuffer + low_delay stop FFmpeg
+# from queueing frames (lower live latency). Respect a user override.
+os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay")

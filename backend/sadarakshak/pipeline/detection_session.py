@@ -15,6 +15,7 @@ States: connecting -> connected -> detecting <-> accident
 import threading
 import time
 import uuid
+from collections import deque
 from typing import Callable, Dict, List, Optional
 
 import cv2
@@ -67,6 +68,10 @@ class DetectionSession:
         self.last_accident: Optional[Dict] = None
         self.frame_seq = 0
         self._raw_frame: Optional[np.ndarray] = None
+        # measured latencies (ms, rolling windows) - see status()["latency"]
+        self._lat_pipeline = deque(maxlen=60)   # frame decoded -> annotated JPEG ready
+        self._lat_delivery = deque(maxlen=60)   # frame decoded -> JPEG handed to a browser stream
+        self._lat_detection = deque(maxlen=20)  # frame decoded -> YOLO result applied
 
         self._stop = threading.Event()
         self._cond = threading.Condition()
@@ -115,38 +120,48 @@ class DetectionSession:
 
     # ------------------------------------------------------------ frames for the browser
     def get_jpeg(self, annotated: bool = True):
+        """Latest frame as JPEG: (bytes, sequence number, capture time)."""
+        captured_at = self.detector.last_jpeg_captured_at
         if annotated:
-            return self.detector.last_jpeg, self.frame_seq
+            return self.detector.last_jpeg, self.frame_seq, captured_at
         frame = self._raw_frame
         if frame is None:
-            return None, self.frame_seq
+            return None, self.frame_seq, captured_at
         ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-        return (buf.tobytes() if ok else None), self.frame_seq
+        return (buf.tobytes() if ok else None), self.frame_seq, captured_at
+
+    def note_delivery(self, captured_at: float):
+        """Called by the MJPEG endpoint when a frame is sent to a browser."""
+        if captured_at:
+            self._lat_delivery.append((time.time() - captured_at) * 1000)
 
     # ------------------------------------------------------------ threads
     def _inference_loop(self):
-        times = []
+        times, done_at = [], deque(maxlen=30)
         while not self._stop.is_set():
             with self._cond:
                 while self._pending is None and not self._stop.is_set():
                     self._cond.wait(0.5)
                 if self._stop.is_set():
                     break
-                frame, idx = self._pending
+                frame, idx, captured_at = self._pending
                 self._pending = None
             t0 = time.time()
             try:
                 boxes, class_ids, confs = self.model.detect_objects(frame)
                 self.detector.update_detections(boxes, class_ids, confs, frame_index=idx)
+                self._lat_detection.append((time.time() - captured_at) * 1000)
             except Exception as e:
                 logging.error(f"[session {self.id}] inference error: {e}")
                 time.sleep(0.2)
                 continue
-            times.append(time.time() - t0)
+            now = time.time()
+            times.append(now - t0)
             times = times[-20:]
-            total = sum(times)
-            self.inference_ms = round(1000 * total / len(times), 1)
-            self.inference_fps = round(len(times) / total, 2) if total > 0 else 0.0
+            self.inference_ms = round(1000 * sum(times) / len(times), 1)
+            done_at.append(now)
+            span = done_at[-1] - done_at[0]
+            self.inference_fps = round((len(done_at) - 1) / span, 2) if span > 0 else 0.0  # inferences actually run per second
 
     def _capture_loop(self):
         try:
@@ -187,6 +202,7 @@ class DetectionSession:
 
             while not self._stop.is_set():
                 ok, frame = cap.read()
+                captured_at = time.time()
                 if not ok or frame is None:
                     break
                 if not got_frame:
@@ -206,10 +222,11 @@ class DetectionSession:
 
                 # hand the newest frame to YOLO (an older, not yet inferred frame is dropped)
                 with self._cond:
-                    self._pending = (frame, self.detector.frame_index + 1)
+                    self._pending = (frame, self.detector.frame_index + 1, captured_at)
                     self._cond.notify()
 
-                self.detector.process_frame(frame)
+                self.detector.process_frame(frame, captured_at=captured_at)
+                self._lat_pipeline.append(self.detector.last_process_ms)
                 self._raw_frame = frame
                 self.frames += 1
                 self.frame_seq += 1
@@ -293,6 +310,19 @@ class DetectionSession:
             "accidentIds": list(self.accident_ids),
             "lastAccident": self.last_accident,
             "streamUrl": f"/api/detect/sessions/{self.id}/stream",
+            "latency": self.latency(),
+        }
+
+    def latency(self) -> Dict:
+        def avg(d):
+            vals = list(d)
+            return round(sum(vals) / len(vals), 1) if vals else None
+        return {
+            "pipelineMs": avg(self._lat_pipeline),    # decode -> annotated frame ready
+            "deliveryMs": avg(self._lat_delivery),    # decode -> sent to the browser
+            "detectionMs": avg(self._lat_detection),  # decode -> YOLO11 result applied
+            "inferenceMs": self.inference_ms,         # YOLO11 forward pass only
+            "engine": f"{getattr(self.model, 'engine', '?')}/{getattr(self.model, 'device', '?')}",
         }
 
 

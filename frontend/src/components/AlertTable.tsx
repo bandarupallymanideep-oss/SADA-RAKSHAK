@@ -5,7 +5,8 @@ import {
   Clock, 
   MapPin, 
   Camera as CameraIcon, 
-  ArrowUpRight,
+  Eye,
+  Trash2,
   ShieldAlert
 } from 'lucide-react';
 import type { AccidentRecord, AccidentStatus } from '../api/types';
@@ -14,6 +15,7 @@ interface AlertTableProps {
   alerts: AccidentRecord[];
   onMarkAcknowledged: (id: string) => void;
   onMarkResolved: (id: string) => void;
+  onDelete?: (alert: AccidentRecord) => void;
   onRowClick?: (alert: AccidentRecord) => void;
 }
 
@@ -21,6 +23,7 @@ export const AlertTable: React.FC<AlertTableProps> = ({
   alerts,
   onMarkAcknowledged,
   onMarkResolved,
+  onDelete,
   onRowClick
 }) => {
   const navigate = useNavigate();
@@ -77,7 +80,7 @@ export const AlertTable: React.FC<AlertTableProps> = ({
   }
 
   return (
-    <div className="rounded-2xl bg-slate-900/80 border border-slate-800 overflow-hidden shadow-2xl backdrop-blur-md">
+    <div className="rounded-2xl bg-slate-900/80 border border-slate-800 overflow-hidden card-shadow backdrop-blur-md">
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
@@ -101,7 +104,7 @@ export const AlertTable: React.FC<AlertTableProps> = ({
                 <tr
                   key={record.id}
                   onClick={() => onRowClick ? onRowClick(record) : navigate(`/alerts/${record.id}`)}
-                  className="hover:bg-slate-800/40 transition-colors cursor-pointer group"
+                  className="hover:bg-slate-800/40 transition-colors cursor-pointer group animate-page-in"
                 >
                   {/* Accident ID + Severity */}
                   <td className="py-3.5 px-4 whitespace-nowrap">
@@ -114,8 +117,10 @@ export const AlertTable: React.FC<AlertTableProps> = ({
                         <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-red-600/80 text-white animate-pulse">REC</span>
                       )}
                     </div>
-                    <div className="text-[11px] text-slate-400 truncate max-w-[170px] mt-0.5">
-                      {record.collisionType}
+                    <div className="mt-1">
+                      <span className="inline-block text-[10px] font-mono font-semibold tracking-wide px-1.5 py-0.5 rounded bg-slate-800 text-slate-200 border border-slate-700">
+                        {record.categoryLabel || record.collisionType}
+                      </span>
                     </div>
                   </td>
 
@@ -199,11 +204,24 @@ export const AlertTable: React.FC<AlertTableProps> = ({
                       <button
                         type="button"
                         onClick={() => navigate(`/alerts/${record.id}`)}
-                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
-                        title="View complete evidence file"
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-mono transition-colors cursor-pointer"
+                        title="View accident evidence"
                       >
-                        <ArrowUpRight className="w-4 h-4" />
+                        <Eye className="w-3.5 h-3.5" />
+                        View
                       </button>
+                      {onDelete && (
+                        <button
+                          type="button"
+                          onClick={() => onDelete(record)}
+                          disabled={record.recording}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-xs font-mono transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                          title={record.recording ? 'Clip still recording — delete after it is saved' : 'Delete alert'}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Delete
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

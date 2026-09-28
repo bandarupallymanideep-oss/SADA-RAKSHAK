@@ -35,8 +35,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const { cameras, backendOnline, health } = useCameras();
   const activeDetections = cameras.filter(c => c.detection?.active);
   const activeSessions = activeDetections.length;
-  const avgInferenceMs = activeSessions
-    ? Math.round(activeDetections.reduce((sum, c) => sum + (c.detection?.inferenceMs || 0), 0) / activeSessions)
+  const inferring = activeDetections.filter(c => (c.detection?.inferenceMs || 0) > 0);
+  const avgInferenceMs = inferring.length
+    ? Math.round(inferring.reduce((sum, c) => sum + (c.detection?.inferenceMs || 0), 0) / inferring.length)
     : null;
 
   const navItems = [
@@ -72,8 +73,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       )}
 
       <aside className={`
-        fixed lg:static top-0 bottom-0 left-0 z-50
-        bg-slate-950/95 border-r border-slate-800/80 flex flex-col justify-between shrink-0 h-screen select-none backdrop-blur-xl transition-all duration-300
+        force-dark fixed lg:static top-0 bottom-0 left-0 z-50
+        bg-[#111a28] border-r border-slate-800/80 flex flex-col justify-between shrink-0 h-screen select-none backdrop-blur-xl transition-all duration-300
         ${isOpen ? 'translate-x-0 w-64' : '-translate-x-full lg:translate-x-0'}
         ${!isOpen && isCollapsed ? 'lg:w-20' : 'lg:w-64'}
       `}>

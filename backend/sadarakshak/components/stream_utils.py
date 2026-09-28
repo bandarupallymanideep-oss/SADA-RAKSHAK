@@ -23,6 +23,7 @@ import cv2
 from sadarakshak.constant.application import (
     ACCIDENT_CLIPS_DIR, UPLOADS_DIR, VIDEO_EXTENSIONS,
     STREAM_OPEN_TIMEOUT_MS, STREAM_READ_TIMEOUT_MS, TCP_CONNECT_TIMEOUT_S, RTSP_HANDSHAKE_TIMEOUT_S,
+    STREAM_DECODER_THREADS,
 )
 from sadarakshak.logger import logging
 
@@ -150,6 +151,8 @@ def open_capture(source: str) -> cv2.VideoCapture:
             params += [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, STREAM_OPEN_TIMEOUT_MS]
         if hasattr(cv2, "CAP_PROP_READ_TIMEOUT_MSEC"):
             params += [cv2.CAP_PROP_READ_TIMEOUT_MSEC, STREAM_READ_TIMEOUT_MS]
+        if STREAM_DECODER_THREADS > 0 and hasattr(cv2, "CAP_PROP_N_THREADS"):
+            params += [cv2.CAP_PROP_N_THREADS, STREAM_DECODER_THREADS]  # avoid frame-threading delay
         cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG, params)
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         return cap

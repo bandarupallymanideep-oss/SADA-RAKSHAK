@@ -42,7 +42,7 @@ export const Toast: React.FC<ToastProps> = ({ alert, onDismiss }) => {
             </div>
 
             <h4 className="mt-1 text-sm font-semibold text-white truncate">
-              {alert.collisionType}
+              {alert.categoryLabel || alert.collisionType}
             </h4>
 
             <p className="text-xs text-slate-300 mt-0.5 truncate">

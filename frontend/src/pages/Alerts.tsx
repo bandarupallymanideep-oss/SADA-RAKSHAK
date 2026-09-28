@@ -1,74 +1,53 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { CheckCheck, Download } from 'lucide-react';
 import { useAlerts } from '../context/AlertsContext';
 import { useCameras } from '../context/CameraContext';
 import { AlertFilterBar } from '../components/AlertFilterBar';
 import { AlertTable } from '../components/AlertTable';
-import type { AlertFilterOptions } from '../api/types';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import { filterAlerts } from '../api/alerts';
+import type { AccidentRecord, AlertFilterOptions } from '../api/types';
 
 export const Alerts: React.FC = () => {
-  const { alerts, markAcknowledged, markResolved, newAlertsCount } = useAlerts();
+  const { alerts, markAcknowledged, markResolved, newAlertsCount, removeAlert, categories, isLoading } = useAlerts();
   const { cameras } = useCameras();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [filters, setFilters] = useState<AlertFilterOptions>({});
+  // camera + category live in the URL (e.g. /alerts?camera=cam-3&category=car-car) so the
+  // camera "Alerts & Violations" actions link straight to a filtered view in the same tab
+  const [otherFilters, setOtherFilters] = useState<AlertFilterOptions>({});
+  const filters: AlertFilterOptions = {
+    ...otherFilters,
+    cameraId: searchParams.get('camera') || undefined,
+    category: searchParams.get('category') || undefined,
+  };
+
+  const setFilters = (next: AlertFilterOptions) => {
+    const { cameraId, category, ...rest } = next;
+    setOtherFilters(rest);
+    const params: Record<string, string> = {};
+    if (cameraId && cameraId !== 'all') params.camera = cameraId;
+    if (category && category !== 'all') params.category = category;
+    setSearchParams(params, { replace: true });
+  };
+
   const [isExporting, setIsExporting] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<AccidentRecord | null>(null);
 
-  // Filter alerts according to filter state with useMemo
-  const filteredAlerts = React.useMemo(() => {
-    const now = Date.now();
-    const todayPrefix = new Date().toISOString().slice(0, 10);
+  const filteredAlerts = useMemo(
+    () => filterAlerts(alerts, filters),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [alerts, searchParams, otherFilters]
+  );
 
-    return alerts.filter(record => {
-      // Camera filter
-      if (filters.cameraId && filters.cameraId !== 'all' && record.cameraId !== filters.cameraId) {
-        return false;
-      }
-      // Location filter
-      if (filters.location && filters.location !== 'all' && record.location !== filters.location) {
-        return false;
-      }
-      // Date Range filter
-      if (filters.dateRange && filters.dateRange !== 'all') {
-        const recordTime = new Date(record.timestamp).getTime();
-        if (filters.dateRange === 'today') {
-          const oneDayMs = 24 * 60 * 60 * 1000;
-          const isTodayDate = record.timestamp.startsWith(todayPrefix);
-          if (!isTodayDate && (now - recordTime > oneDayMs)) {
-            return false;
-          }
-        } else if (filters.dateRange === 'week') {
-          const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
-          if (now - recordTime > sevenDaysMs) {
-            return false;
-          }
-        } else if (filters.dateRange === 'month') {
-          const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
-          if (now - recordTime > thirtyDaysMs) {
-            return false;
-          }
-        }
-      }
-      // Status filter
-      if (filters.status && filters.status !== 'all' && record.status.toLowerCase() !== filters.status.toLowerCase()) {
-        return false;
-      }
-      // Severity filter
-      if (filters.severity && filters.severity !== 'all' && record.severity.toLowerCase() !== filters.severity.toLowerCase()) {
-        return false;
-      }
-      // Search query
-      if (filters.search && filters.search.trim()) {
-        const q = filters.search.toLowerCase().trim();
-        const matches = record.id.toLowerCase().includes(q) ||
-          record.location.toLowerCase().includes(q) ||
-          record.cameraName.toLowerCase().includes(q) ||
-          record.collisionType.toLowerCase().includes(q);
-        if (!matches) return false;
-      }
-      return true;
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    alerts.forEach(a => {
+      if (a.category) counts[a.category] = (counts[a.category] || 0) + 1;
     });
-  }, [alerts, filters]);
-
+    return counts;
+  }, [alerts]);
 
   const handleAcknowledgeAll = async () => {
     const unacknowledged = alerts.filter(a => a.status === 'New');
@@ -83,41 +62,41 @@ export const Alerts: React.FC = () => {
   const handleExportCsv = () => {
     setIsExporting(true);
     try {
-      const headers = ['Accident ID', 'Camera ID', 'Camera Name', 'Location', 'Timestamp', 'Confidence Score', 'Severity', 'Collision Type', 'Status'];
+      const headers = ['Accident ID', 'Category', 'Camera ID', 'Camera Name', 'Location', 'Timestamp', 'Confidence Score', 'Severity', 'Status', 'Video'];
       const rows = filteredAlerts.map(a => [
         a.id,
+        `"${a.categoryLabel || ''}"`,
         a.cameraId,
         `"${a.cameraName}"`,
         `"${a.location}"`,
         a.timestamp,
         a.confidenceScore,
         a.severity,
-        `"${a.collisionType}"`,
-        a.status
+        a.status,
+        a.videoClipUrl
       ]);
-
-      const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-      const encodedUri = encodeURI(csvContent);
+      const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
       const link = document.createElement('a');
-      link.setAttribute('href', encodedUri);
-      link.setAttribute('download', `sadarakshak_accidents_${new Date().toISOString().slice(0, 10)}.csv`);
+      link.href = url;
+      link.download = `sadarakshak_accidents_${new Date().toISOString().slice(0, 10)}.csv`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      URL.revokeObjectURL(url);
     } finally {
       setTimeout(() => setIsExporting(false), 500);
     }
   };
 
+  const cameraName = filters.cameraId ? cameras.find(c => c.id === filters.cameraId)?.name || filters.cameraId : null;
+
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3">
-            <h2 className="text-2xl font-black text-white tracking-tight font-sans">
-              Alerts & Accident Footage
-            </h2>
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="text-2xl font-black text-white tracking-tight font-sans">Alerts & Violations</h2>
             {newAlertsCount > 0 && (
               <span className="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-red-600 text-white shadow-lg shadow-red-600/30 animate-pulse">
                 {newAlertsCount} ACTION REQUIRED
@@ -125,7 +104,9 @@ export const Alerts: React.FC = () => {
             )}
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            Accidents detected by YOLO11 with the automatically saved footage (backend/detected_accidents)
+            {cameraName
+              ? <>Accidents detected on <strong className="text-slate-200">{cameraName}</strong> — clear the camera filter to see all cameras</>
+              : 'Accidents detected by YOLO11 with the automatically saved evidence footage'}
           </p>
         </div>
 
@@ -140,7 +121,6 @@ export const Alerts: React.FC = () => {
               <span>Acknowledge All ({newAlertsCount})</span>
             </button>
           )}
-
           <button
             type="button"
             onClick={handleExportCsv}
@@ -154,20 +134,49 @@ export const Alerts: React.FC = () => {
         </div>
       </div>
 
-      {/* Filter and Search Bar */}
       <AlertFilterBar
         filters={filters}
         onChange={setFilters}
         cameras={cameras}
+        categories={categories}
+        categoryCounts={categoryCounts}
         availableLocations={Array.from(new Set(alerts.map(a => a.location)))}
         totalRecordsCount={alerts.length}
       />
 
-      {/* Accident Records Table */}
-      <AlertTable
-        alerts={filteredAlerts}
-        onMarkAcknowledged={(id) => markAcknowledged(id)}
-        onMarkResolved={(id) => markResolved(id)}
+      {isLoading ? (
+        <div className="space-y-2">
+          {[1, 2, 3, 4].map(n => (
+            <div key={n} className="h-14 rounded-xl bg-slate-900/60 border border-slate-800 animate-pulse" />
+          ))}
+        </div>
+      ) : (
+        <AlertTable
+          alerts={filteredAlerts}
+          onMarkAcknowledged={(id) => markAcknowledged(id)}
+          onMarkResolved={(id) => markResolved(id)}
+          onDelete={(record) => setPendingDelete(record)}
+        />
+      )}
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        title="Delete Accident Alert?"
+        message={
+          pendingDelete && (
+            <>
+              <strong className="text-white">{pendingDelete.id}</strong> ({pendingDelete.categoryLabel || pendingDelete.collisionType})
+              from <strong className="text-white">{pendingDelete.cameraName}</strong> will be removed from Alerts & Violations.
+              Its video is moved to <code className="text-xs">detected_accidents/deleted/</code> on the server.
+            </>
+          )
+        }
+        confirmLabel="Delete"
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={async () => {
+          if (pendingDelete) await removeAlert(pendingDelete.id);
+          setPendingDelete(null);
+        }}
       />
     </div>
   );

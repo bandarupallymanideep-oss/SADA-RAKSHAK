@@ -93,3 +93,52 @@ class VideoClipWriter:
     @property
     def duration_seconds(self) -> float:
         return round(self.frames_written / self.fps, 2)
+
+
+class AsyncClipWriter:
+    """Runs a VideoClipWriter on a background thread so recording never stalls the live capture.
+
+    ``write`` accepts a BGR frame or JPEG bytes (the pre-accident buffer); ``close`` drains the
+    queue and finalizes the file.
+    """
+
+    def __init__(self, path, fps: float, width: int, height: int):
+        import queue
+        import threading
+        self._writer = VideoClipWriter(path, fps, width, height)  # opened here so errors surface immediately
+        self._queue = queue.Queue(maxsize=600)
+        self._thread = threading.Thread(target=self._run, name=f"clip-{Path(path).stem}", daemon=True)
+        self._thread.start()
+
+    def _run(self):
+        while True:
+            item = self._queue.get()
+            if item is None:
+                break
+            try:
+                if isinstance(item, (bytes, bytearray)):
+                    item = cv2.imdecode(np.frombuffer(item, np.uint8), cv2.IMREAD_COLOR)
+                if item is not None:
+                    self._writer.write(item)
+            except Exception as e:
+                logging.error(f"Error writing accident clip frame: {e}")
+        self._writer.close()
+
+    def write(self, frame):
+        self._queue.put(frame)
+
+    def close(self):
+        self._queue.put(None)
+        self._thread.join()
+
+    @property
+    def frames_written(self):
+        return self._writer.frames_written
+
+    @property
+    def duration_seconds(self):
+        return self._writer.duration_seconds
+
+    @property
+    def backend(self):
+        return self._writer.backend

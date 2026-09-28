@@ -61,7 +61,7 @@ export const StatCard: React.FC<StatCardProps> = ({
 
   return (
     <div
-      className={`relative overflow-hidden rounded-2xl bg-slate-900/70 border ${style.border} ${style.bgGlow} p-5 backdrop-blur-md transition-all duration-300 shadow-xl group`}
+      className={`relative overflow-hidden rounded-2xl bg-slate-900/70 border ${style.border} ${style.bgGlow} p-5 backdrop-blur-md card-elevate group`}
     >
       {/* Top accent line */}
       <div className={`absolute top-0 left-0 right-0 h-0.5 ${style.bar} opacity-60 group-hover:opacity-100 transition-opacity`} />

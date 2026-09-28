@@ -15,6 +15,7 @@ Inference and frame handling are decoupled so a live stream can be rendered and
 recorded at full frame rate while YOLO runs as fast as the hardware allows.
 """
 import threading
+import time
 from collections import Counter, deque
 from datetime import datetime, timezone
 from typing import Callable, Dict, Optional
@@ -23,12 +24,13 @@ import cv2
 import numpy as np
 
 from sadarakshak.constant.application import (
-    CONFIDENCE_THRESHOLD, DISPLAY_CONFIDENCE, MIN_ACCIDENT_HITS, HIT_WINDOW,
+    CONFIDENCE_THRESHOLD, DISPLAY_CONFIDENCE, MIN_ACCIDENT_HITS, CONFIRM_WINDOW_S, MIN_HIT_RATIO,
     PRE_ACCIDENT_SECONDS, POST_ACCIDENT_SECONDS, MAX_CLIP_SECONDS, COOLDOWN_SECONDS,
     MAX_FRAME_WIDTH, MJPEG_QUALITY, REQUIRE_ROAD_CONTEXT,
 )
 from sadarakshak.components.accident_store import AccidentStore, accident_store, utc_now_iso
-from sadarakshak.components.video_writer import VideoClipWriter
+from sadarakshak.components.categories import category_for, category_label
+from sadarakshak.components.video_writer import AsyncClipWriter
 from sadarakshak.logger import logging
 
 # Class ids verified against model/best.pt (model.names).
@@ -92,13 +94,15 @@ class AccidentDetector:
 
         self.frame_index = 0
         self.last_jpeg: Optional[bytes] = None
+        self.last_jpeg_captured_at: float = 0.0  # wall-clock time the frame was captured/decoded
+        self.last_process_ms: float = 0.0        # annotate + JPEG encode (+ clip write) time
         self.last_frame_size = None
 
         # latest inference result (drawn on every frame until the next inference)
         self._boxes = np.empty((0, 4))
         self._class_ids = np.empty((0,), dtype=np.int32)
         self._confs = np.empty((0,))
-        self._hits = deque(maxlen=HIT_WINDOW)
+        self._hit_log = deque()  # (frame_index, hit) within the confirmation window
         self.inferences = 0
         self.accident_in_last_inference = False
         self.last_accident_conf = 0.0
@@ -146,7 +150,13 @@ class AccidentDetector:
                     for cid, conf in zip(self._class_ids, self._confs)):
                 best_name, best_conf = None, 0.0  # no vehicle/person in view: not a road accident
             hit = best_name is not None
-            self._hits.append(hit)
+            idx = self.frame_index if frame_index is None else frame_index
+            self._hit_log.append((idx, hit))
+            window_frames = CONFIRM_WINDOW_S * self.fps
+            while self._hit_log and idx - self._hit_log[0][0] > window_frames:
+                self._hit_log.popleft()
+            recent_hits = sum(1 for _, h in self._hit_log if h)
+            confirmed = recent_hits >= MIN_ACCIDENT_HITS and recent_hits / len(self._hit_log) >= MIN_HIT_RATIO
             self.accident_in_last_inference = hit
             self.last_accident_conf = best_conf
             if hit:
@@ -156,7 +166,7 @@ class AccidentDetector:
                     self._event_classes[best_name] += 1
                     if best_conf > self._event_best[1]:
                         self._event_best = (best_name, best_conf)
-                elif sum(self._hits) >= MIN_ACCIDENT_HITS and self._cooldown_left <= 0:
+                elif confirmed and self._cooldown_left <= 0:
                     self._pending_start = True
                     self._event_classes[best_name] += 1
                     if best_conf > self._event_best[1]:
@@ -194,8 +204,9 @@ class AccidentDetector:
         return out
 
     # ------------------------------------------------------------ per frame
-    def process_frame(self, frame: np.ndarray) -> np.ndarray:
+    def process_frame(self, frame: np.ndarray, captured_at: Optional[float] = None) -> np.ndarray:
         """Annotate a frame and advance the recording state machine. Returns the annotated frame."""
+        captured_at = captured_at or time.time()
         with self._lock:
             self.frame_index += 1
             if self._cooldown_left > 0:
@@ -208,6 +219,8 @@ class AccidentDetector:
             ok, jpg = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, MJPEG_QUALITY])
             jpeg = jpg.tobytes() if ok else None
             self.last_jpeg = jpeg
+            self.last_jpeg_captured_at = captured_at
+            self.last_process_ms = (time.time() - captured_at) * 1000
             self.last_frame_size = (annotated.shape[1], annotated.shape[0])
             if just_started:
                 cv2.imwrite(str(self.store.snapshot_path(self.active["id"])), annotated,
@@ -228,7 +241,8 @@ class AccidentDetector:
     # ------------------------------------------------------------ events
     def _write(self, frame):
         try:
-            self._writer.write(frame)
+            # copy: the caller may reuse the array while the writer thread encodes it
+            self._writer.write(frame if isinstance(frame, bytes) else frame.copy())
         except Exception as e:
             logging.error(f"Error writing accident clip: {e}")
 
@@ -242,17 +256,15 @@ class AccidentDetector:
         clip_path = self.store.clip_path(accident_id)
         h, w = frame.shape[:2]
         try:
-            self._writer = VideoClipWriter(clip_path, self.fps, w, h)
+            self._writer = AsyncClipWriter(clip_path, self.fps, w, h)
         except Exception as e:
             logging.error(f"Cannot create accident clip {clip_path.name}: {e}")
             self._writer = None
             clip_path.unlink(missing_ok=True)  # release the reserved name
             return False
-        for jpeg in self.pre_buffer:  # footage leading up to the accident
-            img = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
-            if img is not None:
-                self._write(img)
-        pre_frames = self._writer.frames_written
+        for jpeg in self.pre_buffer:  # footage leading up to the accident (decoded on the writer thread)
+            self._write(jpeg)
+        pre_frames = len(self.pre_buffer)
         self.pre_buffer.clear()
 
         class_name, conf = self._event_best
@@ -272,6 +284,8 @@ class AccidentDetector:
             "timestamp": utc_now_iso(),
             "videoOffsetSeconds": round(max(0, self.frame_index - 1) / self.fps, 2) if self.source_type != "rtsp" else None,
             "accidentType": class_name,
+            "category": category_for(class_name),
+            "categoryLabel": category_label(category_for(class_name)),
             "collisionType": label,
             "vehiclesInvolved": vehicles,
             "confidence": round(conf, 4),
@@ -291,7 +305,7 @@ class AccidentDetector:
         self.store.save(record)
         self.active = record
         self._event_frames = 0
-        self._event_hits = sum(self._hits)
+        self._event_hits = sum(1 for _, h in self._hit_log if h)
         logging.info(f"ACCIDENT DETECTED -> {accident_id} ({class_name} {conf:.2f}) camera='{record['cameraName']}'")
         return True
 
@@ -310,6 +324,8 @@ class AccidentDetector:
             "recording": False,
             "endedAt": utc_now_iso(),
             "accidentType": class_name or rec["accidentType"],
+            "category": category_for(class_name or rec["accidentType"]),
+            "categoryLabel": category_label(category_for(class_name or rec["accidentType"])),
             "collisionType": label,
             "vehiclesInvolved": vehicles,
             "confidence": round(conf, 4),
@@ -326,7 +342,7 @@ class AccidentDetector:
         self._cooldown_left = int(COOLDOWN_SECONDS * self.fps)
         self._event_classes = Counter()
         self._event_best = (None, 0.0)
-        self._hits.clear()
+        self._hit_log.clear()
         logging.info(f"Accident footage saved: {rec['clipFile']} ({rec['durationSeconds']}s, {rec['clipFrames']} frames)")
         self._emit("accident_saved", rec)
 

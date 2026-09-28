@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import type { AccidentRecord, AlertFilterOptions, DashboardStats } from '../api/types';
-import { getAlerts, updateAlertStatus, computeStats, filterAlerts } from '../api/alerts';
+import type { AccidentCategory, AccidentRecord, AlertFilterOptions, DashboardStats } from '../api/types';
+import { getAlerts, updateAlertStatus, computeStats, filterAlerts, deleteAlert, getAccidentCategories } from '../api/alerts';
 import { audioAlarm } from '../utils/audioAlarm';
 import { useCameras } from './CameraContext';
 import { useAuth } from './AuthContext';
@@ -20,6 +20,8 @@ interface AlertsContextType {
   markAcknowledged: (id: string, notes?: string) => Promise<AccidentRecord>;
   markResolved: (id: string, notes?: string) => Promise<AccidentRecord>;
   saveNotes: (id: string, notes: string) => Promise<AccidentRecord>;
+  removeAlert: (id: string) => Promise<void>;
+  categories: AccidentCategory[];
   dismissRecentAlert: () => void;
   soundEnabled: boolean;
   setSoundEnabled: (enabled: boolean) => void;
@@ -41,6 +43,11 @@ export const AlertsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [flashingCameraIds, setFlashingCameraIds] = useState<Set<string>>(new Set());
   const [soundEnabled, setSoundEnabledState] = useState<boolean>(true);
   const knownIds = useRef<Set<string> | null>(null);
+  const [categories, setCategories] = useState<AccidentCategory[]>([]);
+
+  useEffect(() => {
+    getAccidentCategories().then(setCategories).catch(() => setCategories([]));
+  }, []);
 
   const announce = useCallback((record: AccidentRecord) => {
     setRecentAlert(record);
@@ -106,6 +113,12 @@ export const AlertsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return updated;
   };
 
+  const removeAlert = async (id: string) => {
+    await deleteAlert(id);
+    setAlerts(prev => prev.filter(a => a.id !== id));
+    setRecentAlert(prev => (prev?.id === id ? null : prev));
+  };
+
   const fetchFilteredAlerts = async (filters?: AlertFilterOptions) => filterAlerts(alerts, filters);
   const dismissRecentAlert = useCallback(() => setRecentAlert(null), []);
 
@@ -127,6 +140,8 @@ export const AlertsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         markAcknowledged,
         markResolved,
         saveNotes,
+        removeAlert,
+        categories,
         dismissRecentAlert,
         soundEnabled,
         setSoundEnabled,

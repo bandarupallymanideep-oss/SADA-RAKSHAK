@@ -1,4 +1,4 @@
-import type { AccidentRecord, AccidentStatus, AlertFilterOptions, Camera, DashboardStats } from './types';
+import type { AccidentCategory, AccidentRecord, AccidentStatus, AlertFilterOptions, Camera, DashboardStats } from './types';
 import { apiRequest, backendUrl } from './client';
 
 /** Map a backend accident record (detected_accidents/accidentN.json) to the UI model. */
@@ -24,6 +24,7 @@ export function filterAlerts(records: AccidentRecord[], filters?: AlertFilterOpt
   const todayPrefix = new Date().toISOString().slice(0, 10);
   return records.filter(a => {
     if (filters.cameraId && filters.cameraId !== 'all' && a.cameraId !== filters.cameraId) return false;
+    if (filters.category && filters.category !== 'all' && a.category !== filters.category) return false;
     if (filters.location && filters.location !== 'all' && a.location !== filters.location) return false;
     if (filters.dateRange && filters.dateRange !== 'all') {
       const t = new Date(a.timestamp).getTime();
@@ -70,6 +71,17 @@ export async function updateAlertStatus(
     body: { status, notes, operatorName },
   });
   return mapAccident(raw);
+}
+
+/** Delete an accident alert. The backend moves its files to detected_accidents/deleted/. */
+export async function deleteAlert(id: string): Promise<void> {
+  await apiRequest(`/api/accidents/${id}`, { method: 'DELETE' });
+}
+
+/** Alert categories and whether the current YOLO model supports them. */
+export async function getAccidentCategories(): Promise<AccidentCategory[]> {
+  const res = await apiRequest<{ categories: AccidentCategory[] }>('/api/accident-categories');
+  return res.categories;
 }
 
 /** Dashboard statistics computed from real backend data. */

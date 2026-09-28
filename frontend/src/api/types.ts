@@ -41,6 +41,24 @@ export interface DetectionStatus {
   recordingAccidentId?: string | null;
   accidentIds: string[];
   streamUrl: string;
+  latency?: DetectionLatency;
+}
+
+/** Latencies measured by the backend (ms). */
+export interface DetectionLatency {
+  pipelineMs: number | null;   // frame decoded -> annotated frame ready
+  deliveryMs: number | null;   // frame decoded -> sent to the browser stream
+  detectionMs: number | null;  // frame decoded -> YOLO11 result applied
+  inferenceMs: number;         // YOLO11 forward pass
+  engine: string;              // e.g. openvino/intel:gpu
+}
+
+export interface AccidentCategory {
+  id: string;          // e.g. "car-car"
+  label: string;       // e.g. "CAR–CAR ACCIDENT"
+  required: boolean;   // one of the four specified categories
+  supported: boolean;  // can the current YOLO model detect it?
+  yoloClasses: string[];
 }
 
 export interface ConnectionTestResult {
@@ -113,6 +131,8 @@ export interface AccidentRecord {
   vehiclesInvolved: number;
   collisionType: string;
   accidentType?: string; // YOLO class name
+  category?: string; // e.g. "car-car" (derived from the YOLO class)
+  categoryLabel?: string; // e.g. "CAR–CAR ACCIDENT"
   recording?: boolean; // clip still being written
   durationSeconds?: number;
   clipFrames?: number;
@@ -159,7 +179,9 @@ export interface BackendHealth {
   model: {
     path: string;
     type: string;
+    engine?: string;
     device: string;
+    warmupInferenceMs?: number;
     classes: Record<string, string>;
     accidentClassIds: number[];
     confidenceThreshold: number;
@@ -170,6 +192,7 @@ export interface BackendHealth {
 
 export interface AlertFilterOptions {
   cameraId?: string;
+  category?: string;
   location?: string;
   status?: string;
   severity?: string;

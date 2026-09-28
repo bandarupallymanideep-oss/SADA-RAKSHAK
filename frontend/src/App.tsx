@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import { ThemeProvider } from './context/ThemeContext';
 import { CameraProvider } from './context/CameraContext';
 import { AlertsProvider } from './context/AlertsContext';
 import { Layout } from './components/Layout';
@@ -12,6 +13,7 @@ import { AlertDetail } from './pages/AlertDetail';
 
 export const App: React.FC = () => {
   return (
+    <ThemeProvider>
     <BrowserRouter>
       <AuthProvider>
         <CameraProvider>
@@ -36,6 +38,7 @@ export const App: React.FC = () => {
         </CameraProvider>
       </AuthProvider>
     </BrowserRouter>
+    </ThemeProvider>
   );
 };
 

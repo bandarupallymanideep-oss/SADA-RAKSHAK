@@ -1,16 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
-import { 
-  Lock, 
-  User as UserIcon, 
-  Radio, 
-  AlertCircle, 
-  ArrowRight, 
-  Eye, 
-  EyeOff, 
-  Server
-} from 'lucide-react';
+import { AlertCircle, ArrowRight, Eye, EyeOff, Lock, Radar, Activity, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { getCameras, getHealth } from '../api/cameras';
+
+const ACCENT = '#e4472a';
 
 export const Login: React.FC = () => {
   const { login, isAuthenticated } = useAuth();
@@ -22,8 +16,20 @@ export const Login: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
+  const [cameraCount, setCameraCount] = useState<number | null>(null);
+  const [engine, setEngine] = useState<string | null>(null);
 
-  // If already authenticated, redirect to /dashboard
+  useEffect(() => {
+    getHealth()
+      .then(h => {
+        setBackendOnline(true);
+        setEngine(h.model.device);
+      })
+      .catch(() => setBackendOnline(false));
+    getCameras().then(c => setCameraCount(c.length)).catch(() => setCameraCount(null));
+  }, []);
+
   if (isAuthenticated) {
     return <Navigate to="/dashboard" replace />;
   }
@@ -31,26 +37,14 @@ export const Login: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
-
-    if (!emailOrUsername.trim()) {
-      setErrorMessage('Please enter your operator email or username.');
-      return;
-    }
-    if (!password) {
-      setErrorMessage('Please enter your security access key / password.');
-      return;
-    }
-
+    if (!emailOrUsername.trim()) return setErrorMessage('Please enter your work email or operator ID.');
+    if (!password) return setErrorMessage('Please enter your passphrase.');
     try {
       setIsSubmitting(true);
-      await login({
-        emailOrUsername,
-        password,
-        rememberMe
-      });
+      await login({ emailOrUsername, password, rememberMe });
       navigate('/dashboard');
     } catch (err: any) {
-      setErrorMessage(err?.message || 'Authentication failed. Please verify credentials.');
+      setErrorMessage(err?.message || 'Authentication failed. Please verify your credentials.');
     } finally {
       setIsSubmitting(false);
     }
@@ -67,162 +61,176 @@ export const Login: React.FC = () => {
     setErrorMessage(null);
   };
 
+  const inputCls =
+    'w-full px-4 py-3 rounded-lg bg-[#fbf9f5] border border-[#ddd6cb] text-[15px] text-[#1b2230] placeholder-[#9a9287] outline-none transition-all focus:border-[#e4472a] focus:ring-2 focus:ring-[#e4472a]/15';
+
   return (
-    <div className="min-h-screen w-screen bg-[#070a12] text-slate-100 flex flex-col justify-center items-center p-6 relative overflow-hidden select-none">
-      {/* Background radial glow & grid patterns */}
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,_rgba(239,68,68,0.12),_transparent_60%)] pointer-events-none" />
-      <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b08_1px,transparent_1px),linear-gradient(to_bottom,#1e293b08_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none" />
+    <div className="min-h-screen w-full grid lg:grid-cols-[1.08fr_1fr] bg-[#172231]">
+      {/* ================= LEFT: brand panel ================= */}
+      <aside className="force-dark relative hidden lg:flex flex-col justify-between overflow-hidden bg-[#172231] px-14 py-12 text-white select-none">
+        {/* radar rings */}
+        <div className="pointer-events-none absolute -right-[22%] top-1/2 -translate-y-1/2 w-[860px] h-[860px] rounded-full bg-white/[0.025]" />
+        <div className="pointer-events-none absolute -right-[16%] top-1/2 -translate-y-1/2 w-[700px] h-[700px] rounded-full bg-[#2a1f2b]/70" />
+        <div className="pointer-events-none absolute -right-[10%] top-1/2 -translate-y-1/2 w-[540px] h-[540px] rounded-full border border-[#e4472a]/35 bg-[#172231]" />
+        <div className="pointer-events-none absolute -right-[10%] top-1/2 -translate-y-1/2 w-[540px] h-[540px] rounded-full animate-radar"
+          style={{ background: 'conic-gradient(from 0deg, rgba(228,71,42,0.16), transparent 18%)' }} />
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(228,71,42,0.08),transparent_45%)]" />
 
-      {/* Decorative radar scan circle in background */}
-      <div className="absolute w-[600px] h-[600px] rounded-full border border-red-500/10 pointer-events-none animate-spin-slow opacity-20" />
-
-      <div className="relative z-10 w-full max-w-md">
-        {/* Brand Header */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-red-600 to-amber-600 shadow-2xl shadow-red-600/30 text-white mb-4 border border-red-400/30">
-            <Radio className="w-7 h-7 animate-pulse text-white" />
+        {/* brand */}
+        <div className="relative flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl flex items-center justify-center text-white font-black text-sm tracking-tight on-accent" style={{ background: ACCENT }}>
+            SR
           </div>
-          <h1 className="text-2xl font-black text-white tracking-tight font-sans">
-            SADARAKSHAK
+          <span className="text-[17px] font-extrabold tracking-[0.18em]">SADARAKSHAK</span>
+        </div>
+
+        {/* headline */}
+        <div className="relative max-w-xl">
+          <div className="text-[12px] font-mono tracking-[0.22em] text-slate-400 uppercase">Accident Intelligence / Live</div>
+          <h1 className="mt-5 text-[56px] leading-[1.02] font-black tracking-tight">
+            Guard every road.
+            <span className="block" style={{ color: '#f2795c' }}>Respond in seconds.</span>
           </h1>
-          <p className="text-xs text-slate-400 mt-1.5 font-mono uppercase tracking-widest">
-            Real-Time Road Accident Detection & Monitoring
+          <p className="mt-7 text-[17px] leading-relaxed text-slate-300 max-w-lg">
+            A real-time command surface for road-safety teams. CCTV feeds, YOLO11 accident detection and
+            saved evidence — in one line of sight.
           </p>
         </div>
 
-        {/* Login Card */}
-        <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-7 shadow-2xl backdrop-blur-xl relative overflow-hidden">
-          {/* Subtle top red glow */}
-          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-red-600 via-amber-500 to-red-600" />
+        {/* footer */}
+        <div className="relative pt-6 border-t border-white/10 flex items-center justify-between text-[12px] font-mono tracking-[0.18em] uppercase text-slate-400">
+          <span>Real-time road safety network</span>
+          <span className="flex items-center gap-2">
+            <span
+              className={`w-2 h-2 rounded-full ${
+                backendOnline === false ? 'bg-red-500' : backendOnline ? 'bg-emerald-400 live-dot' : 'bg-slate-500'
+              }`}
+            />
+            {backendOnline === false ? 'Backend offline' : backendOnline ? 'Systems nominal' : 'Checking...'}
+          </span>
+        </div>
+      </aside>
 
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h2 className="text-base font-bold text-white">Operator Sign In</h2>
-              <p className="text-xs text-slate-400">Restricted surveillance console access</p>
-            </div>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/30">
-              SECURE TLS
-            </span>
+      {/* ================= RIGHT: sign-in form ================= */}
+      <main className="force-light relative flex items-center justify-center bg-[#f4f1ec] px-6 py-12 sm:px-12 min-h-screen">
+        <div className="w-full max-w-[488px] animate-page-in">
+          {/* compact brand for small screens */}
+          <div className="flex lg:hidden items-center gap-2.5 mb-10">
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center text-white font-black text-xs on-accent" style={{ background: ACCENT }}>SR</div>
+            <span className="font-extrabold tracking-[0.18em] text-[#1b2230]">SADARAKSHAK</span>
           </div>
 
-          {/* Error Banner */}
+          <div className="text-[13px] font-mono tracking-[0.2em] text-[#6f7a8a] uppercase">Control Room Access</div>
+          <h2 className="mt-3 text-[40px] leading-tight font-black tracking-tight text-[#1b2230]">Welcome back.</h2>
+          <p className="mt-2 text-[17px] text-[#5d6878]">Sign in to the SADARAKSHAK accident response desk.</p>
+
           {errorMessage && (
-            <div className="mb-4 p-3 rounded-xl bg-red-500/15 border border-red-500/40 flex items-start gap-2.5 text-red-400 text-xs font-mono animate-in fade-in">
+            <div className="mt-6 p-3 rounded-lg bg-[#fdecea] border border-[#f3b8ad] flex items-start gap-2.5 text-[#a8321d] text-sm">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
               <span>{errorMessage}</span>
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Username / Email */}
+          <form onSubmit={handleSubmit} className="mt-10 space-y-6">
             <div>
-              <label className="block text-xs font-mono font-medium text-slate-300 mb-1.5">
-                OPERATOR ID / EMAIL
-              </label>
-              <div className="relative">
-                <UserIcon className="w-4 h-4 absolute left-3.5 top-3 text-slate-500" />
-                <input
-                  type="text"
-                  value={emailOrUsername}
-                  onChange={(e) => setEmailOrUsername(e.target.value)}
-                  placeholder="operator@trafficguard.ai"
-                  className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 focus:border-red-500 focus:ring-1 focus:ring-red-500 text-xs text-white placeholder-slate-600 outline-none transition-all font-mono"
-                  autoComplete="username"
-                  required
-                />
-              </div>
+              <label htmlFor="login-email" className="block text-[15px] font-semibold text-[#1b2230] mb-2">Work email</label>
+              <input
+                id="login-email"
+                type="text"
+                value={emailOrUsername}
+                onChange={(e) => setEmailOrUsername(e.target.value)}
+                placeholder="operator@example.org"
+                className={inputCls}
+                autoComplete="username"
+                required
+              />
             </div>
 
-            {/* Password */}
             <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-mono font-medium text-slate-300">
-                  SECURITY KEY / PASSWORD
-                </label>
-                <span className="text-[10px] font-mono text-slate-500">Min 4 chars</span>
-              </div>
+              <label htmlFor="login-pass" className="block text-[15px] font-semibold text-[#1b2230] mb-2">Passphrase</label>
               <div className="relative">
-                <Lock className="w-4 h-4 absolute left-3.5 top-3 text-slate-500" />
                 <input
+                  id="login-pass"
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-slate-950 border border-slate-800 focus:border-red-500 focus:ring-1 focus:ring-red-500 text-xs text-white placeholder-slate-600 outline-none transition-all font-mono"
+                  className={`${inputCls} pr-12`}
                   autoComplete="current-password"
                   required
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-3 text-slate-500 hover:text-slate-300 transition-colors"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-[#6f7a8a] hover:text-[#1b2230] hover:bg-black/5 transition-colors cursor-pointer"
+                  aria-label={showPassword ? 'Hide passphrase' : 'Show passphrase'}
+                  title={showPassword ? 'Hide passphrase' : 'Show passphrase'}
                 >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  {showPassword ? <EyeOff className="w-4.5 h-4.5" /> : password ? <Eye className="w-4.5 h-4.5" /> : <Lock className="w-4.5 h-4.5" />}
                 </button>
               </div>
             </div>
 
-            {/* Remember Me */}
-            <div className="flex items-center justify-between pt-1">
-              <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={rememberMe}
-                  onChange={(e) => setRememberMe(e.target.checked)}
-                  className="w-4 h-4 rounded bg-slate-950 border-slate-800 text-red-600 focus:ring-red-500 cursor-pointer accent-red-600"
-                />
-                <span>Remember session on this terminal</span>
-              </label>
-            </div>
+            <label className="flex items-center gap-3 cursor-pointer select-none text-[15px] text-[#5d6878]">
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                className="w-4 h-4 rounded cursor-pointer"
+                style={{ accentColor: ACCENT }}
+              />
+              <span>Keep me signed in on this device</span>
+            </label>
 
-            {/* Submit Button */}
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white text-xs font-bold font-mono tracking-wider uppercase shadow-xl shadow-red-600/30 flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+              className="on-accent w-full py-4 rounded-lg text-white text-[15px] font-bold flex items-center justify-center gap-2 shadow-lg shadow-[#e4472a]/25 transition-all hover:brightness-110 active:scale-[0.99] cursor-pointer disabled:opacity-60"
+              style={{ background: ACCENT }}
             >
               {isSubmitting ? (
                 <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>AUTHENTICATING OPERATOR...</span>
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>Signing in...</span>
                 </>
               ) : (
                 <>
-                  <span>INITIALIZE SYSTEM ACCESS</span>
+                  <span>Enter control room</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
             </button>
           </form>
 
-          {/* Quick Demo Credentials for Reviewers */}
-          <div className="mt-6 pt-5 border-t border-slate-800 text-center">
-            <p className="text-[11px] font-mono text-slate-400 mb-2">QUICK FILL DEMO CREDENTIALS</p>
-            <div className="flex items-center justify-center gap-2">
-              <button
-                type="button"
-                onClick={() => handleQuickFill('chief')}
-                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-mono text-slate-300 border border-slate-700 transition-colors cursor-pointer"
-              >
-                Control Chief (Admin)
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickFill('analyst')}
-                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-mono text-slate-300 border border-slate-700 transition-colors cursor-pointer"
-              >
-                Incident Analyst
-              </button>
+          <div className="mt-12 pt-8 border-t border-[#e2dcd2] grid grid-cols-3 text-center">
+            <div className="flex flex-col items-center gap-2">
+              <Radar className="w-5 h-5 text-[#1f8a70]" />
+              <span className="text-[13px] text-[#5d6878]">
+                {cameraCount != null ? `${String(cameraCount).padStart(2, '0')} feeds` : 'CCTV feeds'}
+              </span>
+            </div>
+            <div className="flex flex-col items-center gap-2">
+              <Activity className="w-5 h-5" style={{ color: ACCENT }} />
+              <span className="text-[13px] text-[#5d6878]">{engine ? `Live AI · ${engine}` : 'Live AI'}</span>
+            </div>
+            <div className="flex flex-col items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-[#1f8a70]" />
+              <span className="text-[13px] text-[#5d6878]">Evidence saved</span>
             </div>
           </div>
-        </div>
 
-        {/* Footer info */}
-        <div className="text-center mt-6 text-[11px] font-mono text-slate-400 flex items-center justify-center gap-2">
-          <Server className="w-3.5 h-3.5 text-slate-400" />
-          <span>Traffic Incident Command Node #04 // v2.6.0-stable</span>
+          <div className="mt-8 text-center text-[12px] text-[#8a8378]">
+            Demo accounts:{' '}
+            <button type="button" onClick={() => handleQuickFill('chief')} className="underline hover:text-[#1b2230] cursor-pointer">
+              Control Chief
+            </button>
+            {' · '}
+            <button type="button" onClick={() => handleQuickFill('analyst')} className="underline hover:text-[#1b2230] cursor-pointer">
+              Incident Analyst
+            </button>
+          </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 };
